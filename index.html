@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CLASS FEEDBACK</title>
+<style>
+  :root { --bg:#f5f7fb; --card:#fff; --text:#1f2937; --muted:#6b7280; --primary:#4f46e5; --line:#e5e7eb; }
+  * { box-sizing: border-box; }
+  body { margin:0; min-height:100vh; font-family:-apple-system,"Segoe UI","Noto Sans KR",sans-serif; background:var(--bg); color:var(--text); }
+  header { display:flex; justify-content:space-between; align-items:center; padding:16px 24px; }
+  .logo { font-weight:800; letter-spacing:.08em; font-size:1.15rem; color:var(--primary); }
+  main { max-width:720px; margin:0 auto; padding:24px 20px 60px; text-align:center; }
+  h1 { font-size:1.8rem; margin:40px 0 28px; }
+  .votes { display:flex; gap:16px; justify-content:center; flex-wrap:wrap; }
+  button { font:inherit; cursor:pointer; border:1px solid var(--line); background:var(--card); color:var(--text); border-radius:14px; transition:.15s; }
+  button:hover:not(:disabled) { transform:translateY(-2px); box-shadow:0 8px 20px rgba(0,0,0,.08); }
+  button:disabled { opacity:.5; cursor:default; }
+  .vote { width:180px; padding:28px 12px; font-size:1.15rem; }
+  .vote span { display:block; font-size:3rem; margin-bottom:8px; }
+  .small { padding:8px 14px; font-size:.9rem; }
+  .primary { background:var(--primary); color:#fff; border-color:var(--primary); }
+  .danger { color:#dc2626; border-color:#fecaca; }
+  .msg { margin-top:24px; min-height:1.5em; color:var(--primary); font-weight:600; }
+  .msg.err { color:#dc2626; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:16px; padding:24px; text-align:left; }
+  .total { text-align:center; font-size:1.2rem; margin-bottom:20px; }
+  .row { margin:14px 0; }
+  .row .label { display:flex; justify-content:space-between; margin-bottom:6px; }
+  .bar { height:18px; background:#eef0f6; border-radius:9px; overflow:hidden; }
+  .bar > div { height:100%; width:0; border-radius:9px; transition:width .4s; }
+  .toolbar { display:flex; gap:10px; justify-content:center; flex-wrap:wrap; margin-top:24px; }
+  input { width:100%; font:inherit; padding:12px; margin:8px 0; border:1px solid var(--line); border-radius:10px; }
+  .hidden { display:none; }
+  @media (max-width:520px){ .vote{width:100%} h1{font-size:1.4rem} }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">CLASS FEEDBACK</div>
+  <button id="loginBtn" class="small">관리자 로그인</button>
+</header>
+<main>
+  <section id="studentView">
+    <h1>오늘 수업은 어땠나요?</h1>
+    <div class="votes">
+      <button class="vote" data-rating="satisfied"><span>😊</span>만족</button>
+      <button class="vote" data-rating="neutral"><span>😐</span>보통</button>
+      <button class="vote" data-rating="dissatisfied"><span>😞</span>불만족</button>
+    </div>
+    <div id="voteMsg" class="msg"></div>
+  </section>
+
+  <section id="loginView" class="hidden">
+    <h1>관리자 로그인</h1>
+    <form id="loginForm" class="card">
+      <input id="email" type="email" placeholder="이메일" autocomplete="username" required>
+      <input id="password" type="password" placeholder="비밀번호" autocomplete="current-password" required>
+      <div class="toolbar">
+        <button type="submit" class="small primary">로그인</button>
+        <button type="button" id="cancelLogin" class="small">취소</button>
+      </div>
+      <div id="loginMsg" class="msg err"></div>
+    </form>
+  </section>
+
+  <section id="adminView" class="hidden">
+    <h1>수업 만족도 결과</h1>
+    <div class="card">
+      <div class="total">전체 투표 수: <b id="total">0</b></div>
+      <div class="row"><div class="label"><span>😊 만족</span><span id="t-satisfied"></span></div><div class="bar"><div id="b-satisfied" style="background:#22c55e"></div></div></div>
+      <div class="row"><div class="label"><span>😐 보통</span><span id="t-neutral"></span></div><div class="bar"><div id="b-neutral" style="background:#f59e0b"></div></div></div>
+      <div class="row"><div class="label"><span>😞 불만족</span><span id="t-dissatisfied"></span></div><div class="bar"><div id="b-dissatisfied" style="background:#ef4444"></div></div></div>
+    </div>
+    <div class="toolbar">
+      <button id="refreshBtn" class="small primary">결과 새로고침</button>
+      <button id="resetBtn" class="small danger">투표 결과 초기화</button>
+      <button id="logoutBtn" class="small">로그아웃</button>
+    </div>
+    <div id="adminMsg" class="msg err"></div>
+  </section>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="config.js"></script>
+<script>
+const sb = supabase.createClient(window.APP_CONFIG.SUPABASE_URL, window.APP_CONFIG.SUPABASE_PUBLISHABLE_KEY);
+const $ = id => document.getElementById(id);
+const RATINGS = ['satisfied', 'neutral', 'dissatisfied'];
+
+function show(view) {
+  for (const v of ['studentView', 'loginView', 'adminView']) $(v).classList.toggle('hidden', v !== view);
+  $('loginBtn').classList.toggle('hidden', view === 'adminView');
+}
+
+document.querySelectorAll('.vote').forEach(btn => btn.addEventListener('click', async () => {
+  const buttons = document.querySelectorAll('.vote');
+  buttons.forEach(b => b.disabled = true);
+  const msg = $('voteMsg');
+  msg.className = 'msg'; msg.textContent = '';
+  const { error } = await sb.from('votes').insert({ rating: btn.dataset.rating }, { returning: 'minimal' });
+  if (error) { msg.className = 'msg err'; msg.textContent = '저장에 실패했습니다. 다시 시도해 주세요.'; }
+  else msg.textContent = '투표가 완료되었습니다. 감사합니다.';
+  buttons.forEach(b => b.disabled = false);
+}));
+
+$('loginBtn').onclick = () => { $('loginMsg').textContent = ''; show('loginView'); };
+$('cancelLogin').onclick = () => show('studentView');
+
+$('loginForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const { error } = await sb.auth.signInWithPassword({ email: $('email').value, password: $('password').value });
+  $('password').value = '';
+  if (error) { $('loginMsg').textContent = '로그인에 실패했습니다. 이메일과 비밀번호를 확인하세요.'; return; }
+  await loadResults();
+  show('adminView');
+});
+
+async function loadResults() {
+  $('adminMsg').textContent = '';
+  const counts = { satisfied: 0, neutral: 0, dissatisfied: 0 };
+  const { data, error } = await sb.from('votes').select('rating');
+  if (error) { $('adminMsg').textContent = '결과를 불러오지 못했습니다.'; return; }
+  data.forEach(v => counts[v.rating]++);
+  render(counts);
+}
+
+function render(counts) {
+  const total = RATINGS.reduce((s, r) => s + counts[r], 0);
+  $('total').textContent = total;
+  RATINGS.forEach(r => {
+    const pct = total ? Math.round(counts[r] / total * 1000) / 10 : 0;
+    $('t-' + r).textContent = `${counts[r]}표 (${pct}%)`;
+    $('b-' + r).style.width = pct + '%';
+  });
+}
+
+$('refreshBtn').onclick = loadResults;
+
+$('resetBtn').onclick = async () => {
+  if (!confirm('모든 투표 결과를 초기화하시겠습니까? 삭제된 결과는 복구할 수 없습니다.')) return;
+  const { error } = await sb.from('votes').delete().not('id', 'is', null);
+  if (error) { $('adminMsg').textContent = '초기화에 실패했습니다.'; return; }
+  render({ satisfied: 0, neutral: 0, dissatisfied: 0 });
+};
+
+$('logoutBtn').onclick = async () => { await sb.auth.signOut(); show('studentView'); };
+
+(async () => {
+  const { data } = await sb.auth.getSession();
+  if (data.session) { await loadResults(); show('adminView'); }
+})();
+</script>
+</body>
+</html>
